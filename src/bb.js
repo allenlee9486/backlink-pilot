@@ -1,7 +1,7 @@
 // bb.js — bb-browser execution layer
 // Wraps bb-browser CLI as subprocess calls, exposes Playwright-like page API
 
-import { execFileSync } from 'child_process';
+import { spawnSync } from 'child_process';
 
 let _bbTimeout = 30000;
 
@@ -11,10 +11,23 @@ function setBbTimeout(ms) {
 
 function bb(...args) {
   try {
-    return execFileSync('bb-browser', args, {
+    const isWin = process.platform === 'win32';
+    const cmd = isWin ? 'bb-browser.cmd' : 'bb-browser';
+    
+    const result = spawnSync(cmd, args, {
       encoding: 'utf-8',
       timeout: _bbTimeout,
-    }).trim();
+      shell: isWin,
+    });
+
+    if (result.error) throw result.error;
+
+    if (result.status !== 0) {
+      const msg = result.stderr?.trim() || result.stdout?.trim() || 'Unknown error';
+      throw new Error(msg);
+    }
+
+    return result.stdout.trim();
   } catch (e) {
     const msg = e.stderr?.trim() || e.message;
     if (msg.includes('ECONNREFUSED') || msg.includes('No page target') || msg.includes('connect')) {
@@ -36,7 +49,7 @@ function bb(...args) {
 }
 
 function escapeJs(str) {
-  return str.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n');
+  return str.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"').replace(/\n/g, '\\n');
 }
 
 /**
@@ -44,8 +57,13 @@ function escapeJs(str) {
  */
 export function isBbAvailable() {
   try {
-    execFileSync('which', ['bb-browser'], { encoding: 'utf-8' });
-    return true;
+    const isWin = process.platform === 'win32';
+    const cmd = isWin ? 'bb-browser.cmd' : 'bb-browser';
+    const result = spawnSync(cmd, ['--version'], { 
+      encoding: 'utf-8',
+      shell: isWin 
+    });
+    return result.status === 0;
   } catch { return false; }
 }
 
@@ -101,25 +119,35 @@ export class BbPage {
    */
   async cleanup() {
     for (const tabId of this._openedTabs) {
-      try { bb('tab', 'close', tabId); } catch {}
+      try { bb('close', '--tab', tabId); } catch {}
     }
     this._openedTabs = [];
   }
 
   async fill(selectorOrRef, value) {
+    const args = ['fill', selectorOrRef, value];
+    if (this._tabId) args.unshift('--tab', this._tabId);
+
     if (selectorOrRef.startsWith('@')) {
-      bb('fill', selectorOrRef, value);
+      bb(...args);
     } else {
       // CSS selector — find element via eval, then use ref from snapshot
       const ref = await this._resolveRef(selectorOrRef);
-      if (ref) bb('fill', ref, value);
+      if (ref) {
+        // Find 'fill' in args and replace the selectorOrRef part
+        const fillIdx = args.indexOf('fill');
+        args[fillIdx + 1] = ref;
+        bb(...args);
+      }
       else throw new Error(`Element not found: ${selectorOrRef}`);
     }
   }
 
   async click(selectorOrRef) {
     if (selectorOrRef.startsWith('@')) {
-      bb('click', selectorOrRef);
+      const args = ['click', selectorOrRef];
+      if (this._tabId) args.unshift('--tab', this._tabId);
+      bb(...args);
     } else {
       // CSS selector — use evalClick with full user-event simulation
       // This dispatches mousedown/mouseup/click to work with React/Vue components
@@ -133,27 +161,31 @@ export class BbPage {
   }
 
   async textContent(selector) {
-    return bb('eval', `document.querySelector('${escapeJs(selector)}')?.textContent || ''`);
+    return this._eval(`document.querySelector('${escapeJs(selector)}')?.textContent || ''`);
   }
 
   async content() {
-    return bb('eval', 'document.documentElement.outerHTML');
+    return this._eval('document.documentElement.outerHTML');
   }
 
   url() {
-    return bb('eval', 'window.location.href');
+    return this._eval('window.location.href');
   }
 
   async screenshot(path) {
-    if (path) bb('screenshot', path);
-    else bb('screenshot');
+    const args = ['screenshot'];
+    if (path) args.push(path);
+    if (this._tabId) args.unshift('--tab', this._tabId);
+    bb(...args);
   }
 
   /**
    * Get interactive snapshot — returns parsed accessibility tree text
    */
   async snapshot() {
-    return bb('snapshot', '-i');
+    const args = ['snapshot', '-i'];
+    if (this._tabId) args.unshift('--tab', this._tabId);
+    return bb(...args);
   }
 
   /**
@@ -164,7 +196,7 @@ export class BbPage {
     if (selector.includes(':has-text(')) {
       return this._queryHasText(selector);
     }
-    const exists = bb('eval',
+    const exists = this._eval(
       `!!document.querySelector('${escapeJs(selector)}')`);
     if (exists === 'true') return new BbElementHandle(this, selector);
     return null;
@@ -183,8 +215,7 @@ export class BbPage {
     // Take snapshot and find matching element ref
     const snap = await this.snapshot();
     // Try direct eval to check existence first
-    const exists = bb('eval',
-      `!!document.querySelector('${escapeJs(selector)}')`);
+    const exists = this._eval(`!!document.querySelector('${escapeJs(selector)}')`);
     if (exists !== 'true') return null;
 
     // Use eval to click/fill by selector directly
@@ -197,7 +228,7 @@ export class BbPage {
     const match = selector.match(/^(\w+):has-text\(["'](.+?)["']\)$/);
     if (!match) return null;
     const [, tag, text] = match;
-    const exists = bb('eval',
+    const exists = this._eval(
       `!!Array.from(document.querySelectorAll('${tag}')).find(el => el.textContent.includes('${escapeJs(text)}'))`);
     if (exists === 'true') return new BbElementHandle(this, selector, { tag, text });
     return null;
@@ -207,7 +238,7 @@ export class BbPage {
    * Execute JS directly in page and fill/click by CSS selector
    */
   async evalFill(selector, value) {
-    bb('eval', `(() => {
+    this._eval(`(() => {
       const el = document.querySelector('${escapeJs(selector)}');
       if (!el) return;
       el.focus();
@@ -218,7 +249,7 @@ export class BbPage {
   }
 
   async evalClick(selector) {
-    bb('eval', `document.querySelector('${escapeJs(selector)}')?.click()`);
+    this._eval(`document.querySelector('${escapeJs(selector)}')?.click()`);
   }
 
   /**
@@ -226,7 +257,7 @@ export class BbPage {
    * Required for React/Vue components that don't respond to .click()
    */
   async evalClickReal(selector) {
-    bb('eval', `(() => {
+    this._eval(`(() => {
       const el = document.querySelector('${escapeJs(selector)}');
       if (!el) return;
       el.dispatchEvent(new MouseEvent('mousedown', {bubbles:true,cancelable:true}));
@@ -241,7 +272,16 @@ export class BbPage {
   }
 
   async evalClickByText(tag, text) {
-    bb('eval', `Array.from(document.querySelectorAll('${tag}')).find(el => el.textContent.includes('${escapeJs(text)}'))?.click()`);
+    this._eval(`Array.from(document.querySelectorAll('${tag}')).find(el => el.textContent.includes('${escapeJs(text)}'))?.click()`);
+  }
+
+  _eval(code) {
+    // Base64 encode the code to avoid quoting issues on Windows CLI
+    const b64 = Buffer.from(code).toString('base64');
+    const wrapper = `eval(atob('${b64}'))`;
+    const args = ['eval', wrapper];
+    if (this._tabId) args.unshift('--tab', this._tabId);
+    return bb(...args);
   }
 }
 
@@ -258,20 +298,23 @@ export class BbElementHandle {
 
   async isVisible() {
     if (this._tag && this._text) {
-      const result = this._page._config;
-      return bb('eval',
+      return this._page._eval(
         `(() => {
           const el = Array.from(document.querySelectorAll('${this._tag}')).find(e => e.textContent.includes('${escapeJs(this._text)}'));
           if (!el) return false;
+          const style = window.getComputedStyle(el);
+          if (style.display === 'none' || style.visibility === 'hidden') return false;
           const r = el.getBoundingClientRect();
           return r.width > 0 && r.height > 0;
         })()`
       ) === 'true';
     }
-    return bb('eval',
+    return this._page._eval(
       `(() => {
         const el = document.querySelector('${escapeJs(this._selector)}');
         if (!el) return false;
+        const style = window.getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden') return false;
         const r = el.getBoundingClientRect();
         return r.width > 0 && r.height > 0;
       })()`
@@ -280,15 +323,15 @@ export class BbElementHandle {
 
   async textContent() {
     if (this._tag && this._text) {
-      return bb('eval',
+      return this._page._eval(
         `Array.from(document.querySelectorAll('${this._tag}')).find(e => e.textContent.includes('${escapeJs(this._text)}'))?.textContent || ''`);
     }
-    return bb('eval',
+    return this._page._eval(
       `document.querySelector('${escapeJs(this._selector)}')?.textContent || ''`);
   }
 
   async getAttribute(attr) {
-    return bb('eval',
+    return this._page._eval(
       `document.querySelector('${escapeJs(this._selector)}')?.getAttribute('${escapeJs(attr)}') || null`);
   }
 
@@ -306,7 +349,7 @@ export class BbElementHandle {
 
   async evaluate(fn) {
     // Simple evaluate — runs fn as string with el as argument
-    return bb('eval',
+    return this._page._eval(
       `(${fn.toString()})(document.querySelector('${escapeJs(this._selector)}'))`);
   }
 }
@@ -325,7 +368,7 @@ export class BbLocator {
   }
 
   async all() {
-    const countStr = bb('eval',
+    const countStr = this._page._eval(
       `document.querySelectorAll('${escapeJs(this._selector)}').length`);
     const count = parseInt(countStr, 10) || 0;
     return Array.from({ length: count }, (_, i) =>
@@ -335,7 +378,7 @@ export class BbLocator {
   }
 
   async isVisible() {
-    return bb('eval',
+    return this._page._eval(
       `(() => {
         const el = document.querySelector('${escapeJs(this._selector)}');
         if (!el) return false;

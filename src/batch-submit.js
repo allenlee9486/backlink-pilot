@@ -150,14 +150,32 @@ async function submitBlogComment(page, resource, site) {
     'textarea[name*="message" i]',
     'textarea[id*="comment" i]',
     'textarea[placeholder*="comment" i]',
+    'iframe[title*="comment" i]', // Support some iframe comments
   ];
 
   let commentSelector = null;
   for (const sel of commentSelectors) {
     try {
       const el = await page.$(sel);
-      if (el && await el.isVisible()) { commentSelector = sel; break; }
+      if (el) {
+        // If it's visible, we're good. If it's an iframe, we might need special handling
+        // but for now let's just log and try to find a visible one.
+        if (await el.isVisible()) {
+          commentSelector = sel;
+          break;
+        }
+      }
     } catch (e) { continue; }
+  }
+
+  // Fallback: search for any visible textarea if specific ones are not found
+  if (!commentSelector) {
+    try {
+      const anyTextarea = await page.$('textarea');
+      if (anyTextarea && await anyTextarea.isVisible()) {
+        commentSelector = 'textarea';
+      }
+    } catch (e) {}
   }
 
   if (!commentSelector) throw new Error('No comment field found');
@@ -417,7 +435,11 @@ async function batchSubmit(opts = {}) {
 }
 
 // CLI
-if (import.meta.url === `file://${process.argv[1]}`) {
+import { fileURLToPath } from 'url';
+import path from 'path';
+
+if (import.meta.url === `file://${process.argv[1]}` || 
+    fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   const args = process.argv.slice(2);
   const opts = {};
 

@@ -23,7 +23,8 @@ export async function maybeUpdateBbSites(config = {}) {
 
   console.log('🔄 Updating bb-browser site adapters...');
   try {
-    execFileSync('bb-browser', ['site', 'update'], {
+    const cmd = process.platform === 'win32' ? 'bb-browser.cmd' : 'bb-browser';
+    execFileSync(cmd, ['site', 'update'], {
       encoding: 'utf-8',
       timeout: 60000,
       stdio: 'pipe',
@@ -44,15 +45,17 @@ export async function maybeUpdateBbSites(config = {}) {
 export function forceUpdate() {
   console.log('🔄 Updating bb-browser site adapters...');
   try {
-    execFileSync('bb-browser', ['site', 'update'], {
-      encoding: 'utf-8',
+    const cmd = process.platform === 'win32' ? 'bb-browser.cmd' : 'bb-browser';
+    execFileSync(cmd, ['site', 'update'], {
+      encoding: 'utf-8', 
       timeout: 60000,
       stdio: 'inherit',
     });
+    console.log('✅ bb-browser sites updated');
     if (!existsSync('logs')) mkdirSync('logs', { recursive: true });
     writeFileSync(TIMESTAMP_FILE, String(Date.now()), 'utf-8');
   } catch (e) {
-    console.error(`❌ Update failed: ${e.message}`);
+    console.error(`❌ bb-browser site update failed: ${e.message}`);
     process.exit(1);
   }
 }

@@ -1,7 +1,7 @@
 // browser.js — Dual-engine browser wrapper
 // Supports rebrowser-playwright (default) and bb-browser
 
-import { chromium } from 'rebrowser-playwright';
+import { chromium } from 'playwright';
 
 function resolveEngine(config) {
   if (config._engine) return config._engine;
