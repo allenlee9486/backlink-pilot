@@ -14,10 +14,15 @@ function bb(...args) {
     const isWin = process.platform === 'win32';
     const cmd = isWin ? 'bb-browser.cmd' : 'bb-browser';
     
+    // On Windows, we need to be very careful with arguments.
+    // spawnSync with shell: true handles .cmd files, but argument quoting is tricky.
     const result = spawnSync(cmd, args, {
       encoding: 'utf-8',
       timeout: _bbTimeout,
       shell: isWin,
+      // On Windows, use windowsVerbatimArguments to prevent double-quoting issues
+      // when passing complex JS strings to bb-browser
+      ...(isWin ? { windowsVerbatimArguments: false } : {})
     });
 
     if (result.error) throw result.error;
@@ -177,6 +182,11 @@ export class BbPage {
     if (path) args.push(path);
     if (this._tabId) args.unshift('--tab', this._tabId);
     bb(...args);
+  }
+
+  async evaluate(fn, ...args) {
+    const code = `(${fn.toString()})(${args.map(a => JSON.stringify(a)).join(',')})`;
+    return this._eval(code);
   }
 
   /**
@@ -345,6 +355,18 @@ export class BbElementHandle {
 
   async fill(value) {
     await this._page.evalFill(this._selector, value);
+  }
+
+  async scrollIntoView() {
+    await this._page._eval(`(() => {
+      const el = document.querySelector('${escapeJs(this._selector)}');
+      if (!el) return;
+      // Scroll to element and account for potential sticky headers
+      el.scrollIntoView({ behavior: 'auto', block: 'center' });
+      // If it's still covered or near top, nudge it down
+      window.scrollBy(0, -100); 
+    })()`);
+    await new Promise(r => setTimeout(r, 1000));
   }
 
   async evaluate(fn) {

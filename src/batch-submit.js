@@ -132,35 +132,71 @@ function saveGlobalHistory(history) {
   writeFileSync('logs/global-history.json', JSON.stringify([...history], null, 2), 'utf-8');
 }
 
-function isSubmitted(log, globalHistory, url) {
-  return globalHistory.has(url) || log.submissions.some(s => s.url === url);
+function isSubmitted(log, globalHistory, url, siteUrl) {
+  const key = `${siteUrl}|${url}`;
+  return globalHistory.has(key) || 
+         globalHistory.has(url) || // backward compatibility
+         log.submissions.some(s => s.url === url && s.site_url === siteUrl);
 }
 
 // --- Blog comment submission (v2: natural comments, URL in website field) ---
 async function submitBlogComment(page, resource, site) {
   const norm = normalizeResource(resource);
   await page.goto(norm.url, { waitUntil: 'domcontentloaded', timeout: TIMEOUT_MS });
-  await delay(2000); // let lazy-loaded comment forms appear
+  await delay(3000); // Wait for page to settle
 
-  // Find comment textarea
+  // --- Pre-flight: Scroll to bottom to trigger lazy-loaded forms ---
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await delay(1500);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await delay(500);
+
+  // Extra check: if URL has a comment hash, force scroll to it first
+  if (norm.url.includes('#comment-')) {
+    const hash = norm.url.split('#')[1];
+    try {
+      await page.evaluate((id) => {
+        const el = document.getElementById(id) || document.querySelector(`[name="${id}"]`);
+        if (el) el.scrollIntoView({ behavior: 'auto', block: 'center' });
+      }, hash);
+      await delay(1000);
+    } catch (e) {}
+  }
+
+  // --- Step 1: Find comment textarea (or button to reveal it) ---
   const commentSelectors = [
     'textarea[name="comment"]',
     'textarea#comment',
+    '#respond textarea',
+    '.comment-respond textarea',
     'textarea[name*="comment" i]',
-    'textarea[name*="message" i]',
     'textarea[id*="comment" i]',
     'textarea[placeholder*="comment" i]',
-    'iframe[title*="comment" i]', // Support some iframe comments
+    'textarea[name*="message" i]',
+    'textarea', // Fallback to any textarea
+  ];
+
+  const revealSelectors = [
+    'button:has-text("Post a Comment")',
+    'button:has-text("Leave a Reply")',
+    'a:has-text("Leave a Comment")',
+    '#respond a',
+    '.comment-reply-link'
   ];
 
   let commentSelector = null;
+
+  // Try to find textarea first
   for (const sel of commentSelectors) {
     try {
       const el = await page.$(sel);
-      if (el) {
-        // If it's visible, we're good. If it's an iframe, we might need special handling
-        // but for now let's just log and try to find a visible one.
-        if (await el.isVisible()) {
+      if (el && await el.isVisible()) {
+        const rect = JSON.parse(await page.evaluate((s) => {
+          const e = document.querySelector(s);
+          const r = e.getBoundingClientRect();
+          return JSON.stringify({ w: r.width, h: r.height });
+        }, sel));
+        if (rect.w > 10 && rect.h > 10) {
           commentSelector = sel;
           break;
         }
@@ -168,17 +204,39 @@ async function submitBlogComment(page, resource, site) {
     } catch (e) { continue; }
   }
 
-  // Fallback: search for any visible textarea if specific ones are not found
+  // If not found, try to reveal it
   if (!commentSelector) {
-    try {
-      const anyTextarea = await page.$('textarea');
-      if (anyTextarea && await anyTextarea.isVisible()) {
-        commentSelector = 'textarea';
-      }
-    } catch (e) {}
+    for (const sel of revealSelectors) {
+      try {
+        const btn = await page.$(sel);
+        if (btn && await btn.isVisible()) {
+          console.log(`    🔘 Clicking reveal button: ${sel}`);
+          await btn.click();
+          await delay(2000);
+          // Try finding textarea again
+          for (const ts of commentSelectors) {
+            const el = await page.$(ts);
+            if (el && await el.isVisible()) {
+              commentSelector = ts;
+              break;
+            }
+          }
+          if (commentSelector) break;
+        }
+      } catch (e) { continue; }
+    }
   }
 
   if (!commentSelector) throw new Error('No comment field found');
+
+  // --- Step 2: Scroll and Fill ---
+  try {
+    const el = await page.$(commentSelector);
+    if (el) {
+      await el.scrollIntoView();
+      await delay(1000);
+    }
+  } catch (e) {}
 
   // Pick a random natural comment
   const comment = pickRandom(COMMENT_TEMPLATES);
@@ -190,6 +248,8 @@ async function submitBlogComment(page, resource, site) {
 
   // Fill name field
   const nameSelectors = [
+    '#respond input[name="author"]', '#respond input#author',
+    '.comment-respond input[name="author"]', '.comment-respond input#author',
     'input[name="author"]', 'input#author',
     'input[name*="name" i]', 'input[name*="author" i]',
     'input[placeholder*="name" i]',
@@ -207,6 +267,8 @@ async function submitBlogComment(page, resource, site) {
 
   // Fill email field
   const emailSelectors = [
+    '#respond input[name="email"]', '#respond input#email',
+    '.comment-respond input[name="email"]', '.comment-respond input#email',
     'input[name="email"]', 'input#email',
     'input[type="email"]', 'input[name*="email" i]',
   ];
@@ -224,6 +286,8 @@ async function submitBlogComment(page, resource, site) {
   // Fill URL/website field with our site URL (this is the backlink!)
   if (norm.has_url_field) {
     const urlSelectors = [
+      '#respond input[name="url"]', '#respond input#url',
+      '.comment-respond input[name="url"]', '.comment-respond input#url',
       'input[name="url"]', 'input#url',
       'input[name*="website" i]', 'input[name*="url" i]',
       'input[type="url"]', 'input[placeholder*="website" i]',
@@ -290,6 +354,7 @@ async function processResource(resource, site, page, log) {
     url: norm.url,
     type: norm.type,
     site: site.name,
+    site_url: site.url,
     timestamp: new Date().toISOString(),
     status: 'unknown',
   };
@@ -366,7 +431,7 @@ async function batchSubmit(opts = {}) {
   const prioritized = prioritizeResources(resources);
   const pending = prioritized.filter(r => {
     const url = r.url || r.URL;
-    return !isSubmitted(log, globalHistory, url);
+    return !isSubmitted(log, globalHistory, url, site.url);
   });
 
   // Only blog_comments with URL field and no captcha
@@ -406,9 +471,10 @@ async function batchSubmit(opts = {}) {
       log.submissions.push(result);
       saveLog(log);
 
-      // Track in global history
+      // Track in global history using composite key
       const url = resource.url || resource.URL;
-      globalHistory.add(url);
+      const key = `${site.url}|${url}`;
+      globalHistory.add(key);
       saveGlobalHistory(globalHistory);
 
       // Random delay
