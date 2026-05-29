@@ -1,4 +1,4 @@
-# 🦌 七鹿式·趋势雷达 (v5 Watchlist Edition) | 2026-05-27 17:48 UTC
+# 🦌 七鹿式·趋势雷达 (v5 Watchlist Edition) | 2026-05-27 18:17 UTC
 
 🔥 0 个黄金信号 · 0 个博主动态新词 · 0 个谷歌飙升词 · 24h 自动化扫描
 
@@ -32,16 +32,16 @@
 ## �📊 平台实时数据汇总
 
 ### 🎮 Roblox 黄金名单 (并发>10K & <180d)
-- **[Brookhaven 🏡RP](https://www.roblox.com/games/4924922222)**: 331,680 在线 (活跃)
-- **[Blox Fruits](https://www.roblox.com/games/2753915549)**: 282,978 在线 (活跃)
-- **[[🦆] Adopt Me!](https://www.roblox.com/games/920587237)**: 222,153 在线 (活跃)
-- **[99 Nights in the Forest 🔦](https://www.roblox.com/games/79546208627805)**: 207,718 在线 (活跃)
-- **[RIVALS](https://www.roblox.com/games/17625359962)**: 207,713 在线 (活跃)
-- **[Slime RNG](https://www.roblox.com/games/92416421522960)**: 152,400 在线 (活跃)
-- **[[🌋] Kick a Lucky Block](https://www.roblox.com/games/89469502395769)**: 148,835 在线 (活跃)
-- **[Steal a Brainrot](https://www.roblox.com/games/109983668079237)**: 137,375 在线 (活跃)
-- **[Murder Mystery 2](https://www.roblox.com/games/142823291)**: 124,495 在线 (活跃)
-- **[[BLACK DEATH] Jujutsu Shenanigans](https://www.roblox.com/games/9391468976)**: 117,810 在线 (活跃)
+- **[[🌋] Kick a Lucky Block](https://www.roblox.com/games/89469502395769)**: 166,539 在线 (活跃)
+- **[[PART 2] Survive Zombie Arena](https://www.roblox.com/games/114204398207377)**: 135,142 在线 (活跃)
+- **[[🌵UPD] Fish It! 🐟](https://www.roblox.com/games/121864768012064)**: 114,121 在线 (活跃)
+- **[ 🎲 Pet Simulator 99! 👑](https://www.roblox.com/games/8737899170)**: 76,217 在线 (活跃)
+- **[Sol's RNG [ Eon 1 - 21🪐]](https://www.roblox.com/games/15532962292)**: 56,666 在线 (活跃)
+- **[[CURE] Violence District](https://www.roblox.com/games/93978595733734)**: 55,011 在线 (活跃)
+- **[Be Flash For Brainrots!](https://www.roblox.com/games/136066387156306)**: 30,040 在线 (活跃)
+- **[[UPD] 🧟 Survive the Apocalypse](https://www.roblox.com/games/90148635862803)**: 24,952 在线 (活跃)
+- **[Dead Rails [ENDLESS]](https://www.roblox.com/games/116495829188952)**: 24,424 在线 (活跃)
+- **[Spin a Soccer Card](https://www.roblox.com/games/112490729816320)**: 21,000 在线 (活跃)
 
 ### 📺 YouTube 频次排行 (200+ 频道)
 ✨ YouTube 扫描数据同步中...

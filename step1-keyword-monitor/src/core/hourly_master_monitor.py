@@ -31,7 +31,8 @@ def run_script(script_path, args=None):
     
     try:
         # 使用 subprocess.run 保持同步执行，cwd 设置为项目根目录
-        result = subprocess.run(cmd, cwd=PROJECT_ROOT, capture_output=True, text=True, encoding='utf-8')
+        # errors='replace' 解决 Windows 上可能出现的编码解码错误
+        result = subprocess.run(cmd, cwd=PROJECT_ROOT, capture_output=True, text=True, encoding='utf-8', errors='replace')
         if result.returncode == 0:
             print(f"[{datetime.now().strftime('%H:%M:%S')}] <<< Success: {name}")
             # 只输出最后几行重要信息

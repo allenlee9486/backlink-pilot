@@ -23,11 +23,14 @@ export async function maybeUpdateBbSites(config = {}) {
 
   console.log('🔄 Updating bb-browser site adapters...');
   try {
-    const cmd = process.platform === 'win32' ? 'bb-browser.cmd' : 'bb-browser';
-    execFileSync(cmd, ['site', 'update'], {
+    const isWin = process.platform === 'win32';
+    const cmd = isWin ? 'bb-browser.cmd' : 'bb-browser';
+    // Use spawnSync with shell: true for better Windows compatibility
+    const { spawnSync } = await import('child_process');
+    spawnSync(cmd, ['site', 'update'], {
       encoding: 'utf-8',
       timeout: 60000,
-      stdio: 'pipe',
+      shell: isWin,
     });
     console.log('✅ bb-browser sites updated');
   } catch (e) {

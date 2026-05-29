@@ -7,8 +7,8 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { createSession, delay, humanType } from './browser.js';
 
 const TIMEOUT_MS = 30000;
-const MIN_DELAY = 15000;  // 15-45s between submissions
-const MAX_DELAY = 45000;
+const MIN_DELAY = 5000;  // Reduced for testing: 5-15s between submissions
+const MAX_DELAY = 15000;
 
 // --- Natural comment templates ---
 // URL goes in the website field, NOT in the comment body
@@ -146,7 +146,9 @@ async function submitBlogComment(page, resource, site) {
   await delay(3000); // Wait for page to settle
 
   // --- Pre-flight: Scroll to bottom to trigger lazy-loaded forms ---
-  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await page.evaluate(() => {
+    if (document.body) window.scrollTo(0, document.body.scrollHeight);
+  });
   await delay(1500);
   await page.evaluate(() => window.scrollTo(0, 0));
   await delay(500);
@@ -172,16 +174,23 @@ async function submitBlogComment(page, resource, site) {
     'textarea[name*="comment" i]',
     'textarea[id*="comment" i]',
     'textarea[placeholder*="comment" i]',
+    'textarea[placeholder*="reply" i]',
     'textarea[name*="message" i]',
+    'textarea[class*="comment" i]',
+    'div[contenteditable="true"]', // Modern editors
     'textarea', // Fallback to any textarea
   ];
 
   const revealSelectors = [
     'button:has-text("Post a Comment")',
     'button:has-text("Leave a Reply")',
+    'button:has-text("Add a Comment")',
     'a:has-text("Leave a Comment")',
+    'a:has-text("Write a Comment")',
     '#respond a',
-    '.comment-reply-link'
+    '.comment-reply-link',
+    '.show-comments',
+    '#show-comments-button'
   ];
 
   let commentSelector = null;
@@ -240,6 +249,7 @@ async function submitBlogComment(page, resource, site) {
 
   // Pick a random natural comment
   const comment = pickRandom(COMMENT_TEMPLATES);
+  console.log(`    📝 Filling comment: ${comment.substring(0, 30)}...`);
   await humanType(page, commentSelector, comment);
   await delay(300);
 
@@ -258,6 +268,7 @@ async function submitBlogComment(page, resource, site) {
     try {
       const el = await page.$(sel);
       if (el && await el.isVisible()) {
+        console.log(`    👤 Filling name: ${persona.name}`);
         await humanType(page, sel, persona.name);
         break;
       }
@@ -276,6 +287,7 @@ async function submitBlogComment(page, resource, site) {
     try {
       const el = await page.$(sel);
       if (el && await el.isVisible()) {
+        console.log(`    📧 Filling email: ${persona.email}`);
         await humanType(page, sel, persona.email);
         break;
       }
@@ -297,6 +309,7 @@ async function submitBlogComment(page, resource, site) {
       try {
         const el = await page.$(sel);
         if (el && await el.isVisible()) {
+          console.log(`    🔗 Filling website: ${site.url}`);
           await humanType(page, sel, site.url);
           break;
         }
@@ -378,6 +391,15 @@ async function processResource(resource, site, page, log) {
       return result;
     }
 
+    // Pre-flight blocker check
+    const blocker = await checkBlockers(page);
+    if (blocker) {
+      result.status = 'skipped';
+      result.reason = blocker;
+      console.log(`    ⏭️  Skipped (${blocker})`);
+      return result;
+    }
+
     // Navigate and check blockers
     if (norm.type === 'blog_comment') {
       await submitBlogComment(page, resource, site);
@@ -393,7 +415,7 @@ async function processResource(resource, site, page, log) {
 
   } catch (error) {
     const msg = error.message || '';
-    if (msg.includes('Timeout') || msg.includes('timeout') || msg.includes('ERR_')) {
+    if (msg.includes('Timeout') || msg.includes('timeout') || msg.includes('ETIMEDOUT')) {
       result.status = 'skipped';
       result.reason = 'timeout';
       console.log(`    ⏭️  Skipped (timeout/network)`);
@@ -401,6 +423,10 @@ async function processResource(resource, site, page, log) {
       result.status = 'skipped';
       result.reason = msg;
       console.log(`    ⏭️  Skipped (${msg})`);
+    } else if (msg.includes('closed') || msg.includes('context or browser has been closed')) {
+      // Critical browser error - stop the batch to prevent cascaded failures
+      console.error(`\n🛑 CRITICAL BROWSER ERROR: ${msg}`);
+      process.exit(1);
     } else {
       result.status = 'failed';
       result.error = msg;
@@ -458,7 +484,7 @@ async function batchSubmit(opts = {}) {
   const toProcess = actionable.slice(0, limit);
 
   // Resolve engine from CLI args
-  const sessionConfig = { browser: { headless: true } };
+  const sessionConfig = { browser: { headless: opts.visible ? false : true } };
   if (opts.engine) sessionConfig._engine = opts.engine;
   const { page, close } = await createSession(sessionConfig);
 
@@ -470,6 +496,11 @@ async function batchSubmit(opts = {}) {
       const result = await processResource(resource, site, page, log);
       log.submissions.push(result);
       saveLog(log);
+
+      if (opts.visible) {
+        console.log('    👀 Pausing 5s for visibility...');
+        await delay(5000);
+      }
 
       // Track in global history using composite key
       const url = resource.url || resource.URL;
@@ -517,6 +548,7 @@ if (import.meta.url === `file://${process.argv[1]}` ||
     else if (args[i] === '--site' || args[i] === '-s') { opts.siteIndex = parseInt(args[++i], 10); }
     else if (args[i] === '--engine') { opts.engine = args[++i]; }
     else if (args[i] === '--dry-run') { opts.dryRun = true; }
+    else if (args[i] === '--visible') { opts.visible = true; }
   }
 
   batchSubmit(opts).catch(err => {
