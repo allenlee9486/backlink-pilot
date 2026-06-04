@@ -145,23 +145,38 @@ async function submitBlogComment(page, resource, site) {
   await page.goto(norm.url, { waitUntil: 'domcontentloaded', timeout: TIMEOUT_MS });
   await delay(3000); // Wait for page to settle
 
-  // --- Pre-flight: Scroll to bottom to trigger lazy-loaded forms ---
-  await page.evaluate(() => {
-    if (document.body) window.scrollTo(0, document.body.scrollHeight);
+  // --- Pre-flight: Scroll to bottom and top to trigger lazy-loaded forms ---
+  await page.evaluate(async () => {
+    const delay = (ms) => new Promise(r => setTimeout(r, ms));
+    if (document.body) {
+      // Step scroll to trigger various lazy load thresholds
+      window.scrollTo(0, document.body.scrollHeight * 0.3);
+      await delay(500);
+      window.scrollTo(0, document.body.scrollHeight * 0.6);
+      await delay(500);
+      window.scrollTo(0, document.body.scrollHeight * 0.9);
+      await delay(500);
+      window.scrollTo(0, document.body.scrollHeight);
+      await delay(800);
+    }
   });
-  await delay(1500);
+  await delay(2000);
   await page.evaluate(() => window.scrollTo(0, 0));
-  await delay(500);
+  await delay(1000);
 
   // Extra check: if URL has a comment hash, force scroll to it first
   if (norm.url.includes('#comment-')) {
     const hash = norm.url.split('#')[1];
     try {
       await page.evaluate((id) => {
-        const el = document.getElementById(id) || document.querySelector(`[name="${id}"]`);
-        if (el) el.scrollIntoView({ behavior: 'auto', block: 'center' });
+        const el = document.getElementById(id) || document.querySelector(`[name="${id}"]`) || document.querySelector(`[id*="${id}"]`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'auto', block: 'center' });
+          return true;
+        }
+        return false;
       }, hash);
-      await delay(1000);
+      await delay(1500);
     } catch (e) {}
   }
 
@@ -175,9 +190,13 @@ async function submitBlogComment(page, resource, site) {
     'textarea[id*="comment" i]',
     'textarea[placeholder*="comment" i]',
     'textarea[placeholder*="reply" i]',
+    'textarea[placeholder*="leave a message" i]',
+    'textarea[placeholder*="thoughts" i]',
     'textarea[name*="message" i]',
     'textarea[class*="comment" i]',
     'div[contenteditable="true"]', // Modern editors
+    '#comment-editor iframe', // Blogger iframe (special case)
+    'iframe[src*="comment"]', // Any comment iframe
     'textarea', // Fallback to any textarea
   ];
 
@@ -185,15 +204,34 @@ async function submitBlogComment(page, resource, site) {
     'button:has-text("Post a Comment")',
     'button:has-text("Leave a Reply")',
     'button:has-text("Add a Comment")',
+    'button:has-text("Write a Comment")',
     'a:has-text("Leave a Comment")',
     'a:has-text("Write a Comment")',
+    'a:has-text("Post a Comment")',
+    'a:has-text("Add a Comment")',
     '#respond a',
     '.comment-reply-link',
     '.show-comments',
-    '#show-comments-button'
+    '#show-comments-button',
+    '.comment-form-trigger',
+    'button.reply',
+    'a.reply'
   ];
 
   let commentSelector = null;
+
+  // --- Pre-scan: check if form is in an iframe ---
+  const iframes = await page.$$('iframe');
+  for (const frame of iframes) {
+    try {
+      const src = await frame.getAttribute('src') || '';
+      if (src.includes('comment') || src.includes('disqus') || src.includes('facebook')) {
+        console.log(`    ℹ️  Found comment iframe: ${src.substring(0, 50)}...`);
+        // We might need to switch context here in a real playwright script, 
+        // but for batch-submit we'll focus on finding visible elements first.
+      }
+    } catch (e) {}
+  }
 
   // Try to find textarea first
   for (const sel of commentSelectors) {
@@ -202,10 +240,11 @@ async function submitBlogComment(page, resource, site) {
       if (el && await el.isVisible()) {
         const rect = JSON.parse(await page.evaluate((s) => {
           const e = document.querySelector(s);
+          if (!e) return JSON.stringify({ w: 0, h: 0 });
           const r = e.getBoundingClientRect();
           return JSON.stringify({ w: r.width, h: r.height });
         }, sel));
-        if (rect.w > 10 && rect.h > 10) {
+        if (rect.w > 5 && rect.h > 5) {
           commentSelector = sel;
           break;
         }
@@ -263,6 +302,7 @@ async function submitBlogComment(page, resource, site) {
     'input[name="author"]', 'input#author',
     'input[name*="name" i]', 'input[name*="author" i]',
     'input[placeholder*="name" i]',
+    'input[id*="author" i]', 'input[id*="name" i]'
   ];
   for (const sel of nameSelectors) {
     try {
@@ -282,6 +322,7 @@ async function submitBlogComment(page, resource, site) {
     '.comment-respond input[name="email"]', '.comment-respond input#email',
     'input[name="email"]', 'input#email',
     'input[type="email"]', 'input[name*="email" i]',
+    'input[id*="email" i]', 'input[placeholder*="email" i]'
   ];
   for (const sel of emailSelectors) {
     try {
@@ -304,6 +345,7 @@ async function submitBlogComment(page, resource, site) {
       'input[name*="website" i]', 'input[name*="url" i]',
       'input[type="url"]', 'input[placeholder*="website" i]',
       'input[placeholder*="url" i]',
+      'input[id*="url" i]', 'input[id*="website" i]'
     ];
     for (const sel of urlSelectors) {
       try {

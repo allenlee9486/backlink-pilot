@@ -14,10 +14,14 @@ export async function launchBrowser(config = {}) {
 
   const browser = await chromium.launch({
     headless: browserOpts.headless !== false,
+    executablePath: process.env.CHROME_PATH || undefined, // Allow override
     args: [
       '--disable-blink-features=AutomationControlled',
       '--no-sandbox',
+      '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
+      '--disable-extensions',
+      '--start-maximized'
     ],
   });
 
